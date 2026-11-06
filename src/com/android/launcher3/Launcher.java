@@ -664,6 +664,15 @@ public class Launcher extends StatefulActivity<LauncherState>
     }
 
     @Override
+    public void onConfigurationChanged(Configuration newConfig) {
+        super.onConfigurationChanged(newConfig);
+        // HyperOS may resize the Home task as the split-screen divider moves without
+        // delivering another multi-window mode transition. Rebuild DeviceProfile from
+        // the Activity's current WindowMetrics whenever its configuration changes.
+        onHandleConfigurationChanged();
+    }
+
+    @Override
     public void onMultiWindowModeChanged(boolean isInMultiWindowMode, Configuration newConfig) {
         super.onMultiWindowModeChanged(isInMultiWindowMode, newConfig);
         // Re-run the full configuration path so the updated task bounds are applied to the
