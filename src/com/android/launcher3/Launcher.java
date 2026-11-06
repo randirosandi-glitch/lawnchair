@@ -816,6 +816,23 @@ public class Launcher extends StatefulActivity<LauncherState>
         rootView.getWindowVisibleDisplayFrame(visibleFrame);
 
         int tolerancePx = Math.round(getResources().getDisplayMetrics().density * 32f);
+
+        // Some OEMs crop the launcher surface while leaving the Activity's WindowMetrics
+        // and root layout at display size. The visible display frame is queried from
+        // WindowManager and can expose the actual area that remains visible.
+        Rect visibleBounds = new Rect(measuredBounds);
+        if (!visibleFrame.isEmpty() && visibleBounds.intersect(visibleFrame)
+                && (visibleBounds.width() < metricsBounds.availableSize.x - tolerancePx
+                || visibleBounds.height() < metricsBounds.availableSize.y - tolerancePx)) {
+            Log.i(TAG, "Using WindowManager visible frame " + visibleBounds
+                    + " instead of measured root bounds " + measuredBounds
+                    + " and WindowMetrics bounds " + metricsBounds.bounds
+                    + "; inMultiWindow=" + isInMultiWindowMode());
+            // getWindowVisibleDisplayFrame already excludes system decorations, so use
+            // zero insets to avoid subtracting status/navigation bars a second time.
+            return new WindowBounds(visibleBounds, new Rect(), metricsBounds.rotationHint);
+        }
+
         if (measuredBounds.width() >= metricsBounds.bounds.width() - tolerancePx
                 && measuredBounds.height() >= metricsBounds.bounds.height() - tolerancePx) {
             return metricsBounds;
