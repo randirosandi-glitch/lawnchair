@@ -441,7 +441,8 @@ public class Launcher extends StatefulActivity<LauncherState>
                         && bottom - top == oldBottom - oldTop) {
                     return;
                 }
-                // HyperOS can resize the Home task while keeping the same Activity instance.
+                Log.i(TAG, "Launcher root resized to " + (right - left) + "x"
+                        + (bottom - top) + "; inMultiWindow=" + isInMultiWindowMode());
                 // Coalesce resize callbacks so a divider drag triggers one profile rebuild
                 // after the latest root bounds have settled.
                 view.removeCallbacks(mRootBoundsUpdateRunnable);
@@ -683,15 +684,6 @@ public class Launcher extends StatefulActivity<LauncherState>
     }
 
     @Override
-    public void onConfigurationChanged(Configuration newConfig) {
-        super.onConfigurationChanged(newConfig);
-        // HyperOS may resize the Home task as the split-screen divider moves without
-        // delivering another multi-window mode transition. Rebuild DeviceProfile from
-        // the Activity's current WindowMetrics whenever its configuration changes.
-        onHandleConfigurationChanged();
-    }
-
-    @Override
     public void onMultiWindowModeChanged(boolean isInMultiWindowMode, Configuration newConfig) {
         super.onMultiWindowModeChanged(isInMultiWindowMode, newConfig);
         // Re-run the full configuration path so the updated task bounds are applied to the
@@ -766,8 +758,13 @@ public class Launcher extends StatefulActivity<LauncherState>
         // Load configuration-specific DeviceProfile.
         DeviceProfile deviceProfile = idp.getDeviceProfile(this);
         WindowBounds windowBounds = getMultiWindowDisplaySize();
-        if (isInMultiWindowMode() || isWindowSmallerThanDeviceProfile(
-                windowBounds, deviceProfile)) {
+        boolean constrainedWindow = isWindowSmallerThanDeviceProfile(windowBounds, deviceProfile);
+        Log.i(TAG, "Launcher profile bounds=" + windowBounds
+                + ", base=" + deviceProfile.getDeviceProperties().getWidthPx() + "x"
+                + deviceProfile.getDeviceProperties().getHeightPx()
+                + ", inMultiWindow=" + isInMultiWindowMode()
+                + ", constrained=" + constrainedWindow);
+        if (isInMultiWindowMode() || constrainedWindow) {
             // Prefer the measured root bounds when the OEM WindowManager metrics do not match
             // the actual pane. This also covers OEM minimized-Home modes that do not report
             // isInMultiWindowMode() consistently.
@@ -831,6 +828,9 @@ public class Launcher extends StatefulActivity<LauncherState>
                     systemBars.right, systemBars.bottom);
         }
 
+        Log.i(TAG, "Using measured launcher bounds " + measuredBounds
+                + " instead of WindowMetrics bounds " + metricsBounds.bounds
+                + "; inMultiWindow=" + isInMultiWindowMode());
         return new WindowBounds(measuredBounds, measuredInsets, metricsBounds.rotationHint);
     }
 
