@@ -728,28 +728,67 @@ public class Launcher extends StatefulActivity<LauncherState>
             return null;
         }
 
+        // WindowConfiguration.bounds is the outer task frame. appBounds is the actual
+        // application-content rectangle and may be narrower when an OEM keeps the outer frame
+        // at display size while putting Home into the split-screen side pane.
         Rect taskBounds = new Rect(configuration.windowConfiguration.getBounds());
-        if (taskBounds.isEmpty()) {
+        Rect appBounds = configuration.windowConfiguration.getAppBounds() == null
+                ? new Rect()
+                : new Rect(configuration.windowConfiguration.getAppBounds());
+        if (taskBounds.isEmpty() && appBounds.isEmpty()) {
             return null;
         }
 
-        // WindowConfiguration bounds include the task frame; preserve the system-bar insets
-        // used by DeviceProfile so available dimensions are calculated consistently.
-        WindowBounds metricsBounds = super.getMultiWindowDisplaySize();
-        Rect insets = new Rect(metricsBounds.insets);
-        LauncherRootView rootView = getRootView();
-        WindowInsets rootInsets = rootView == null ? null : rootView.getRootWindowInsets();
-        if (rootInsets != null) {
-            android.graphics.Insets systemBars =
-                    rootInsets.getInsets(WindowInsets.Type.systemBars());
-            insets.set(systemBars.left, systemBars.top,
-                    systemBars.right, systemBars.bottom);
+        Rect contentBounds = !appBounds.isEmpty()
+                        && (taskBounds.isEmpty()
+                        || (appBounds.width() <= taskBounds.width()
+                        && appBounds.height() <= taskBounds.height()))
+                ? appBounds
+                : taskBounds;
+        if (contentBounds.isEmpty()) {
+            return null;
         }
 
-        WindowBounds result = new WindowBounds(taskBounds, insets, metricsBounds.rotationHint);
-        Log.i(TAG, "Configuration task bounds=" + result
+        WindowBounds metricsBounds = super.getMultiWindowDisplaySize();
+        int tolerancePx = Math.round(getResources().getDisplayMetrics().density * 32f);
+
+        // Do not cache a full-display Configuration rectangle. On some HyperOS builds that
+        // rectangle describes the launcher host/display rather than the visible Home task pane.
+        // Returning null lets the measured root/visible-frame path resolve that case instead.
+        boolean isConstrainedByConfiguration =
+                contentBounds.width() < metricsBounds.bounds.width() - tolerancePx
+                || contentBounds.height() < metricsBounds.bounds.height() - tolerancePx;
+        if (!isConstrainedByConfiguration) {
+            Log.i(TAG, "Ignoring non-constrained Configuration bounds. task=" + taskBounds
+                    + ", app=" + appBounds + ", WindowMetrics=" + metricsBounds.bounds
+                    + ", inMultiWindow=" + isInMultiWindowMode());
+            return null;
+        }
+
+        // appBounds is already the area available to app content, so it must not have system
+        // insets subtracted a second time. Outer task bounds retain the ordinary inset handling.
+        boolean usingAppBounds = contentBounds == appBounds;
+        Rect insets = usingAppBounds ? new Rect() : new Rect(metricsBounds.insets);
+        if (!usingAppBounds) {
+            LauncherRootView rootView = getRootView();
+            WindowInsets rootInsets = rootView == null ? null : rootView.getRootWindowInsets();
+            if (rootInsets != null) {
+                android.graphics.Insets systemBars =
+                        rootInsets.getInsets(WindowInsets.Type.systemBars());
+                insets.set(systemBars.left, systemBars.top,
+                        systemBars.right, systemBars.bottom);
+            }
+        }
+
+        WindowBounds result = new WindowBounds(
+                contentBounds, insets, metricsBounds.rotationHint);
+        Log.i(TAG, "Using constrained Configuration bounds=" + result
+                + ", source=" + (usingAppBounds ? "appBounds" : "taskBounds")
+                + ", task=" + taskBounds + ", app=" + appBounds
+                + ", WindowMetrics=" + metricsBounds.bounds
                 + ", screenDp=" + configuration.screenWidthDp + "x"
-                + configuration.screenHeightDp);
+                + configuration.screenHeightDp
+                + ", inMultiWindow=" + isInMultiWindowMode());
         return result;
     }
 
