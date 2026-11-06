@@ -1,4 +1,5 @@
 name: CI
+# Pad fork: ensure CI is triggered on lawnchair-pad/dev for split-screen validation.
 
 on:
   push:
