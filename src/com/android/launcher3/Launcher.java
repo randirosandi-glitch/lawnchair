@@ -252,6 +252,7 @@ import com.android.launcher3.util.Thunk;
 import com.android.launcher3.util.TouchController;
 import com.android.launcher3.util.TraceHelper;
 import com.android.launcher3.util.WallpaperThemeManager;
+import com.android.launcher3.util.WindowBounds;
 import com.android.launcher3.views.FloatingIconView;
 import com.android.launcher3.views.FloatingSurfaceView;
 import com.android.launcher3.views.OptionsPopupView;
@@ -433,6 +434,20 @@ public class Launcher extends StatefulActivity<LauncherState>
 
     private boolean mIsTopResumedActivity;
 
+    private final Runnable mRootBoundsUpdateRunnable = this::onHandleConfigurationChanged;
+    private final View.OnLayoutChangeListener mRootBoundsChangeListener =
+            (view, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom) -> {
+                if (right - left == oldRight - oldLeft
+                        && bottom - top == oldBottom - oldTop) {
+                    return;
+                }
+                // HyperOS can resize the Home task while keeping the same Activity instance.
+                // Coalesce resize callbacks so a divider drag triggers one profile rebuild
+                // after the latest root bounds have settled.
+                view.removeCallbacks(mRootBoundsUpdateRunnable);
+                view.postDelayed(mRootBoundsUpdateRunnable, 100);
+            };
+
     public static Launcher getLauncher(Context context) {
         return fromContext(context);
     }
@@ -511,6 +526,10 @@ public class Launcher extends StatefulActivity<LauncherState>
         setDefaultKeyMode(DEFAULT_KEYS_SEARCH_LOCAL);
 
         setContentView(getRootView());
+
+        // Observe the actual measured Home window. Some OEM split-screen implementations
+        // update the task's surface/layout before the usual multi-window callback path.
+        getRootView().addOnLayoutChangeListener(mRootBoundsChangeListener);
 
         if (mOnInitialBindListener != null) {
             getRootView().getViewTreeObserver().addOnPreDrawListener(mOnInitialBindListener);
@@ -744,14 +763,15 @@ public class Launcher extends StatefulActivity<LauncherState>
      * Returns {@code true} if a new DeviceProfile is initialized, and {@code false} otherwise.
      */
     protected boolean initDeviceProfile(InvariantDeviceProfile idp) {
-        // Load configuration-specific DeviceProfile
+        // Load configuration-specific DeviceProfile.
         DeviceProfile deviceProfile = idp.getDeviceProfile(this);
-        if (isInMultiWindowMode()) {
-            // Apply the current task window bounds before comparing profiles. The base profile
-            // may remain unchanged when entering or resizing split-screen, even though the
-            // multi-window profile must be recalculated for the available pane size.
-            deviceProfile = deviceProfile.getMultiWindowProfile(
-                    this, getMultiWindowDisplaySize());
+        WindowBounds windowBounds = getMultiWindowDisplaySize();
+        if (isInMultiWindowMode() || isWindowSmallerThanDeviceProfile(
+                windowBounds, deviceProfile)) {
+            // Prefer the measured root bounds when the OEM WindowManager metrics do not match
+            // the actual pane. This also covers OEM minimized-Home modes that do not report
+            // isInMultiWindowMode() consistently.
+            deviceProfile = deviceProfile.getMultiWindowProfile(this, windowBounds);
         }
         if (mDeviceProfile == deviceProfile) {
             return false;
@@ -772,9 +792,57 @@ public class Launcher extends StatefulActivity<LauncherState>
     }
 
     /**
-     * Returns whether we should delay spring loaded mode -- for shortcuts and widgets that have
-     * a configuration step, this allows the proper animations to run after other transitions.
+     * Returns the task bounds, preferring the dimensions that Android actually laid out for
+     * LauncherRootView when they are narrower than the WindowManager-reported metrics.
      */
+    @Override
+    protected WindowBounds getMultiWindowDisplaySize() {
+        WindowBounds metricsBounds = super.getMultiWindowDisplaySize();
+        if (!Utilities.ATLEAST_R) {
+            return metricsBounds;
+        }
+
+        LauncherRootView rootView = getRootView();
+        if (rootView == null || !rootView.isAttachedToWindow()
+                || rootView.getWidth() <= 0 || rootView.getHeight() <= 0) {
+            return metricsBounds;
+        }
+
+        int[] location = new int[2];
+        rootView.getLocationOnScreen(location);
+        Rect measuredBounds = new Rect(
+                location[0],
+                location[1],
+                location[0] + rootView.getWidth(),
+                location[1] + rootView.getHeight());
+
+        int tolerancePx = Math.round(getResources().getDisplayMetrics().density * 32f);
+        if (measuredBounds.width() >= metricsBounds.bounds.width() - tolerancePx
+                && measuredBounds.height() >= metricsBounds.bounds.height() - tolerancePx) {
+            return metricsBounds;
+        }
+
+        Rect measuredInsets = new Rect(metricsBounds.insets);
+        WindowInsets rootInsets = rootView.getRootWindowInsets();
+        if (rootInsets != null) {
+            android.graphics.Insets systemBars =
+                    rootInsets.getInsets(WindowInsets.Type.systemBars());
+            measuredInsets.set(systemBars.left, systemBars.top,
+                    systemBars.right, systemBars.bottom);
+        }
+
+        return new WindowBounds(measuredBounds, measuredInsets, metricsBounds.rotationHint);
+    }
+
+    private boolean isWindowSmallerThanDeviceProfile(
+            WindowBounds windowBounds, DeviceProfile deviceProfile) {
+        int tolerancePx = Math.round(getResources().getDisplayMetrics().density * 64f);
+        return windowBounds.bounds.width()
+                        < deviceProfile.getDeviceProperties().getWidthPx() - tolerancePx
+                || windowBounds.bounds.height()
+                        < deviceProfile.getDeviceProperties().getHeightPx() - tolerancePx;
+    }
+
     private int completeAdd(
             int requestCode, Intent intent, int appWidgetId, PendingRequestArgs info) {
         CellPos cellPos = getCellPosMapper().mapModelToPresenter(info);
