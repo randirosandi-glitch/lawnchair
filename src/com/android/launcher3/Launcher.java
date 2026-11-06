@@ -737,15 +737,18 @@ public class Launcher extends StatefulActivity<LauncherState>
     protected boolean initDeviceProfile(InvariantDeviceProfile idp) {
         // Load configuration-specific DeviceProfile
         DeviceProfile deviceProfile = idp.getDeviceProfile(this);
+        if (isInMultiWindowMode()) {
+            // Apply the current task window bounds before comparing profiles. The base profile
+            // may remain unchanged when entering or resizing split-screen, even though the
+            // multi-window profile must be recalculated for the available pane size.
+            deviceProfile = deviceProfile.getMultiWindowProfile(
+                    this, getMultiWindowDisplaySize());
+        }
         if (mDeviceProfile == deviceProfile) {
             return false;
         }
 
         mDeviceProfile = deviceProfile;
-        if (isInMultiWindowMode()) {
-            mDeviceProfile = mDeviceProfile.getMultiWindowProfile(
-                    this, getMultiWindowDisplaySize());
-        }
 
         if (FOLDABLE_SINGLE_PAGE.get() && mDeviceProfile.getDeviceProperties().isTwoPanels()) {
             mCellPosMapper = new TwoPanelCellPosMapper(mDeviceProfile.inv.numColumns);
