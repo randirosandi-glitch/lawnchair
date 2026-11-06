@@ -433,6 +433,7 @@ public class Launcher extends StatefulActivity<LauncherState>
     protected WallpaperThemeManager mWallpaperThemeManager;
 
     private boolean mIsTopResumedActivity;
+    private WindowBounds mLastWindowBounds;
 
     private final Runnable mRootBoundsUpdateRunnable = this::onHandleConfigurationChanged;
     private final View.OnLayoutChangeListener mRootBoundsChangeListener =
@@ -684,6 +685,22 @@ public class Launcher extends StatefulActivity<LauncherState>
     }
 
     @Override
+    public void onConfigurationChanged(Configuration newConfig) {
+        super.onConfigurationChanged(newConfig);
+        // StatefulActivity handles the usual CONFIG_SCREEN_SIZE callbacks. Also compare
+        // actual window bounds here: some OEMs keep the dp configuration unchanged while
+        // the split-screen task's pixel bounds move.
+        if (mLastWindowBounds != null) {
+            WindowBounds currentBounds = getMultiWindowDisplaySize();
+            if (!currentBounds.equals(mLastWindowBounds)) {
+                Log.i(TAG, "Window bounds changed without a configuration-size diff: "
+                        + mLastWindowBounds + " -> " + currentBounds);
+                onHandleConfigurationChanged();
+            }
+        }
+    }
+
+    @Override
     public void onMultiWindowModeChanged(boolean isInMultiWindowMode, Configuration newConfig) {
         super.onMultiWindowModeChanged(isInMultiWindowMode, newConfig);
         // Re-run the full configuration path so the updated task bounds are applied to the
@@ -758,6 +775,7 @@ public class Launcher extends StatefulActivity<LauncherState>
         // Load configuration-specific DeviceProfile.
         DeviceProfile deviceProfile = idp.getDeviceProfile(this);
         WindowBounds windowBounds = getMultiWindowDisplaySize();
+        mLastWindowBounds = windowBounds;
         boolean constrainedWindow = isWindowSmallerThanDeviceProfile(windowBounds, deviceProfile);
         Log.i(TAG, "Launcher profile bounds=" + windowBounds
                 + ", base=" + deviceProfile.getDeviceProperties().getWidthPx() + "x"
