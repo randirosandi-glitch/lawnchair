@@ -812,6 +812,8 @@ public class Launcher extends StatefulActivity<LauncherState>
                 location[1],
                 location[0] + rootView.getWidth(),
                 location[1] + rootView.getHeight());
+        Rect visibleFrame = new Rect();
+        rootView.getWindowVisibleDisplayFrame(visibleFrame);
 
         int tolerancePx = Math.round(getResources().getDisplayMetrics().density * 32f);
         if (measuredBounds.width() >= metricsBounds.bounds.width() - tolerancePx
@@ -830,6 +832,7 @@ public class Launcher extends StatefulActivity<LauncherState>
 
         Log.i(TAG, "Using measured launcher bounds " + measuredBounds
                 + " instead of WindowMetrics bounds " + metricsBounds.bounds
+                + "; visibleFrame=" + visibleFrame
                 + "; inMultiWindow=" + isInMultiWindowMode());
         return new WindowBounds(measuredBounds, measuredInsets, metricsBounds.rotationHint);
     }
@@ -843,6 +846,10 @@ public class Launcher extends StatefulActivity<LauncherState>
                         < deviceProfile.getDeviceProperties().getHeightPx() - tolerancePx;
     }
 
+    /**
+     * Returns whether we should delay spring loaded mode -- for shortcuts and widgets that have
+     * a configuration step, this allows the proper animations to run after other transitions.
+     */
     private int completeAdd(
             int requestCode, Intent intent, int appWidgetId, PendingRequestArgs info) {
         CellPos cellPos = getCellPosMapper().mapModelToPresenter(info);
