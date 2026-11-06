@@ -666,9 +666,9 @@ public class Launcher extends StatefulActivity<LauncherState>
     @Override
     public void onMultiWindowModeChanged(boolean isInMultiWindowMode, Configuration newConfig) {
         super.onMultiWindowModeChanged(isInMultiWindowMode, newConfig);
-        // Always update device profile when multi window mode changed.
-        initDeviceProfile(mDeviceProfile.inv);
-        dispatchDeviceProfileChanged();
+        // Re-run the full configuration path so the updated task bounds are applied to the
+        // workspace, drag layer, controllers, and model when entering or resizing split-screen.
+        onHandleConfigurationChanged();
     }
 
     /**
