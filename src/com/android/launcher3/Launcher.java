@@ -434,6 +434,9 @@ public class Launcher extends StatefulActivity<LauncherState>
 
     private boolean mIsTopResumedActivity;
     private WindowBounds mLastWindowBounds;
+    // Task bounds supplied by HyperOS in the Configuration callback. Keep these as the
+    // authoritative bounds until the next callback; WindowMetrics can lag behind task resize.
+    private WindowBounds mConfigurationWindowBounds;
 
     private final Runnable mRootBoundsUpdateRunnable = this::onHandleConfigurationChanged;
     private final View.OnLayoutChangeListener mRootBoundsChangeListener =
@@ -686,26 +689,68 @@ public class Launcher extends StatefulActivity<LauncherState>
 
     @Override
     public void onConfigurationChanged(Configuration newConfig) {
+        // HyperOS supplies the resized task rectangle in the callback Configuration. Read it
+        // before StatefulActivity handles the callback: Resources/WindowMetrics may still expose
+        // the previous (full-display) bounds at this point.
+        mConfigurationWindowBounds = getConfigurationWindowBounds(newConfig);
         super.onConfigurationChanged(newConfig);
-        // StatefulActivity handles the usual CONFIG_SCREEN_SIZE callbacks. Also compare
-        // actual window bounds here: some OEMs keep the dp configuration unchanged while
-        // the split-screen task's pixel bounds move.
-        if (mLastWindowBounds != null) {
-            WindowBounds currentBounds = getMultiWindowDisplaySize();
-            if (!currentBounds.equals(mLastWindowBounds)) {
-                Log.i(TAG, "Window bounds changed without a configuration-size diff: "
-                        + mLastWindowBounds + " -> " + currentBounds);
-                onHandleConfigurationChanged();
-            }
+
+        // Some split-pane pixel changes do not alter the dp configuration. In that case the
+        // StatefulActivity callback above does not rebuild the profile, so explicitly apply the
+        // task bounds when they differ from the last profile bounds.
+        if (mConfigurationWindowBounds != null
+                && !mConfigurationWindowBounds.equals(mLastWindowBounds)) {
+            Log.i(TAG, "Applying HyperOS Configuration task bounds: "
+                    + mConfigurationWindowBounds);
+            onHandleConfigurationChanged();
         }
     }
 
     @Override
     public void onMultiWindowModeChanged(boolean isInMultiWindowMode, Configuration newConfig) {
+        // Use the Configuration paired with this transition rather than querying Resources,
+        // which may not have received the new task bounds yet.
+        mConfigurationWindowBounds = getConfigurationWindowBounds(newConfig);
         super.onMultiWindowModeChanged(isInMultiWindowMode, newConfig);
         // Re-run the full configuration path so the updated task bounds are applied to the
-        // workspace, drag layer, controllers, and model when entering or resizing split-screen.
+        // workspace, drag layer, controllers, and model when entering or leaving split-screen.
         onHandleConfigurationChanged();
+    }
+
+    /**
+     * Returns the task bounds carried by an Activity configuration callback on Android 11+.
+     * HyperOS documents Configuration.windowConfiguration.bounds as the source of freeform
+     * task dimensions during resize. Fall back to the regular WindowMetrics/root-view path when
+     * the callback does not contain valid bounds.
+     */
+    private WindowBounds getConfigurationWindowBounds(Configuration configuration) {
+        if (!Utilities.ATLEAST_R || configuration == null) {
+            return null;
+        }
+
+        Rect taskBounds = new Rect(configuration.windowConfiguration.getBounds());
+        if (taskBounds.isEmpty()) {
+            return null;
+        }
+
+        // WindowConfiguration bounds include the task frame; preserve the system-bar insets
+        // used by DeviceProfile so available dimensions are calculated consistently.
+        WindowBounds metricsBounds = super.getMultiWindowDisplaySize();
+        Rect insets = new Rect(metricsBounds.insets);
+        LauncherRootView rootView = getRootView();
+        WindowInsets rootInsets = rootView == null ? null : rootView.getRootWindowInsets();
+        if (rootInsets != null) {
+            android.graphics.Insets systemBars =
+                    rootInsets.getInsets(WindowInsets.Type.systemBars());
+            insets.set(systemBars.left, systemBars.top,
+                    systemBars.right, systemBars.bottom);
+        }
+
+        WindowBounds result = new WindowBounds(taskBounds, insets, metricsBounds.rotationHint);
+        Log.i(TAG, "Configuration task bounds=" + result
+                + ", screenDp=" + configuration.screenWidthDp + "x"
+                + configuration.screenHeightDp);
+        return result;
     }
 
     /**
@@ -812,6 +857,13 @@ public class Launcher extends StatefulActivity<LauncherState>
      */
     @Override
     protected WindowBounds getMultiWindowDisplaySize() {
+        // Prefer the task bounds supplied by HyperOS callbacks. WindowMetrics and the root view
+        // can temporarily retain full-display dimensions while the launcher surface is clipped
+        // to its split-screen pane.
+        if (mConfigurationWindowBounds != null) {
+            return mConfigurationWindowBounds;
+        }
+
         WindowBounds metricsBounds = super.getMultiWindowDisplaySize();
         if (!Utilities.ATLEAST_R) {
             return metricsBounds;
