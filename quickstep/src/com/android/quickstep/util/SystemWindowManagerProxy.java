@@ -66,14 +66,8 @@ public class SystemWindowManagerProxy extends WindowManagerProxy {
 
     @Override
     public Rect getCurrentBounds(Context displayInfoContext) {
-        // Use the active task bounds, not the display's maximum bounds. In split-screen,
-        // getMaxBounds() can still describe the full display and make Launcher calculate a
-        // full-width DeviceProfile for a narrow task pane.
-        Rect currentBounds = displayInfoContext.getResources().getConfiguration()
-                .windowConfiguration.getBounds();
-        return currentBounds.isEmpty()
-                ? super.getCurrentBounds(displayInfoContext)
-                : currentBounds;
+        return displayInfoContext.getResources().getConfiguration().windowConfiguration
+                .getMaxBounds();
     }
 
     @Override
